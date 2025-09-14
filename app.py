@@ -23,13 +23,7 @@ def get_puzzle():
     else:
         return "Помилка отримання задачі."
 
-# ====== Ендпоінт для розсилки ======
-@app.route("/send-puzzle")
-def send_puzzle():
-    message = get_puzzle()
-    bot.send_message(chat_id=CHAT_ID, text=message)
-    return "Задача відправлена ✅"
-
-# ====== Запуск веб-сервісу ======
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+# ====== Головна сторінка ======
+@app.route("/")
+def home():
+    return "Б
