@@ -1,55 +1,101 @@
-from flask import Flask
-import requests
-import asyncio
-from telegram import Bot
 import os
+import logging
+import asyncio
+import aiohttp
+import random
+import json
+from datetime import datetime, time
 
-app = Flask(__name__)
+from telegram import Bot
+from telegram.ext import Application, CommandHandler, ContextTypes
 
-# ====== Налаштування ======
-TOKEN = "8092371216:AAF7bfwunLqI2ZrGBpE2goMaxXnol07vG0g"
-CHAT_ID = "598331739"
-bot = Bot(token=TOKEN)
+# ===== Логування =====
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-# ====== Функція отримання шахової задачі ======
-def get_puzzle():
-    url = 'https://lichess.org/api/puzzle/daily'
+# ===== Токен і Chat ID =====
+BOT_TOKEN = "8092371216:AAF7bfwunLqI2ZrGBpE2goMaxXnol07vG0g"
+CHAT_ID = "598331739"  # або -1001234567890 для групи
+
+# ===== URL JSON з задачами =====
+PUZZLES_URL = "https://raw.githubusercontent.com/AntonRomashov87/Chess_puzzles/main/puzzles.json"
+
+# ===== Глобальний список задач =====
+PUZZLES = []
+
+# ===== Завантаження задач =====
+async def load_puzzles():
+    global PUZZLES
     try:
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            puzzle = data.get('puzzle')
-            if puzzle and 'fen' in puzzle and 'solution' in puzzle and 'id' in puzzle:
-                fen = puzzle['fen']
-                solution = ' -> '.join(puzzle['solution'])
-                puzzle_url = f"https://lichess.org/training/{puzzle['id']}"
-                return f"♟️ Щоденна шахова задача\n\nFEN: {fen}\nХіди розв’язку: {solution}\nПосилання: {puzzle_url}"
-            else:
-                return "На жаль, сьогодні немає доступної шахової задачі."
-        else:
-            return f"Помилка отримання задачі: {response.status_code}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(PUZZLES_URL) as resp:
+                resp.raise_for_status()
+                text = await resp.text()
+                data = json.loads(text)
+                if isinstance(data, list):
+                    PUZZLES = data
+                    logger.info(f"Завантажено {len(PUZZLES)} задач")
+                else:
+                    logger.error("JSON має неправильну структуру.")
     except Exception as e:
-        return f"Помилка при зверненні до Lichess API: {e}"
+        logger.error(f"Помилка при завантаженні puzzles.json: {e}")
+        PUZZLES = []
 
-# ====== Асинхронна функція відправки в Telegram ======
-async def send_message_async(message):
+# ===== Відправка випадкової задачі =====
+async def send_random_puzzle(bot: Bot):
+    if not PUZZLES:
+        logger.warning("Задачі ще не завантажені.")
+        return
+    puzzle = random.choice(PUZZLES)
+    msg = f"♟️ {puzzle.get('title', 'Задача')}:\n{puzzle.get('url', '')}"
     try:
-        await bot.send_message(chat_id=CHAT_ID, text=message)
+        await bot.send_message(chat_id=CHAT_ID, text=msg)
+        logger.info("Задача надіслана ✅")
     except Exception as e:
-        print(f"❌ Помилка при відправці в Telegram: {e}")
+        logger.error(f"Помилка при відправці в Telegram: {e}")
 
-# ====== Головна сторінка ======
-@app.route("/")
-def home():
-    return "Бот працює! Використовуйте /send-puzzle для отримання шахової задачі."
+# ===== Команди бота =====
+async def start(update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Привіт! Я шаховий бот 🤖♟\n"
+        "Напиши /puzzle, щоб отримати випадкову задачу."
+    )
 
-# ====== Ендпоінт для розсилки ======
-@app.route("/send-puzzle")
-def send_puzzle():
-    message = get_puzzle()
-    asyncio.run(send_message_async(message))
-    return "Задача відправлена ✅ або повідомлення про помилку буде в логах."
+async def puzzle_command(update, context: ContextTypes.DEFAULT_TYPE):
+    await send_random_puzzle(context.bot)
 
-# ====== Запуск веб-сервісу ======
+# ===== Функція для автоматичної розсилки =====
+async def scheduled_puzzles(bot: Bot):
+    while True:
+        now = datetime.now()
+        # Надсилаємо двічі на день: 08:00 і 20:00
+        if now.time().hour in [8, 20] and now.minute == 0:
+            await send_random_puzzle(bot)
+            # Чекаємо 61 секунду, щоб не надіслати задачу кілька разів за одну хвилину
+            await asyncio.sleep(61)
+        await asyncio.sleep(20)
+
+# ===== Основна функція =====
+async def main():
+    # Завантажуємо задачі
+    await load_puzzles()
+
+    # Створюємо Application (асинхронний бот)
+    app = Application.builder().token(BOT_TOKEN).build()
+
+    # Команди
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("puzzle", puzzle_command))
+
+    # Запускаємо фонове завдання для автоматичної розсилки
+    asyncio.create_task(scheduled_puzzles(app.bot))
+
+    logger.info("Бот запущений ✅")
+    await app.run_polling()
+
+# ===== Запуск =====
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    asyncio.run(main())
