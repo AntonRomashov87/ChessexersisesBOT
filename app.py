@@ -8,6 +8,7 @@ from datetime import datetime, time
 
 from telegram import Bot
 from telegram.ext import Application, CommandHandler, ContextTypes
+import nest_asyncio
 
 # ===== Логування =====
 logging.basicConfig(
@@ -72,10 +73,9 @@ async def scheduled_puzzles(bot: Bot):
     while True:
         now = datetime.now()
         # Надсилаємо двічі на день: 08:00 і 20:00
-        if now.time().hour in [8, 20] and now.minute == 0:
+        if now.hour in [8, 20] and now.minute == 0:
             await send_random_puzzle(bot)
-            # Чекаємо 61 секунду, щоб не надіслати задачу кілька разів за одну хвилину
-            await asyncio.sleep(61)
+            await asyncio.sleep(61)  # чекаємо 61 секунду, щоб не надіслати повторно
         await asyncio.sleep(20)
 
 # ===== Основна функція =====
@@ -98,4 +98,6 @@ async def main():
 
 # ===== Запуск =====
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Дозволяє використовувати asyncio у Render
+    nest_asyncio.apply()
+    asyncio.get_event_loop().run_until_complete(main())
