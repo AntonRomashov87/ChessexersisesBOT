@@ -1,5 +1,6 @@
 from flask import Flask
 import requests
+import asyncio
 from telegram import Bot
 import os
 
@@ -30,6 +31,13 @@ def get_puzzle():
     except Exception as e:
         return f"Помилка при зверненні до Lichess API: {e}"
 
+# ====== Асинхронна функція відправки в Telegram ======
+async def send_message_async(message):
+    try:
+        await bot.send_message(chat_id=CHAT_ID, text=message)
+    except Exception as e:
+        print(f"❌ Помилка при відправці в Telegram: {e}")
+
 # ====== Головна сторінка ======
 @app.route("/")
 def home():
@@ -38,13 +46,9 @@ def home():
 # ====== Ендпоінт для розсилки ======
 @app.route("/send-puzzle")
 def send_puzzle():
-    try:
-        message = get_puzzle()
-        bot.send_message(chat_id=CHAT_ID, text=message)
-        return "Задача відправлена ✅"
-    except Exception as e:
-        # Повертаємо помилку прямо у браузер
-        return f"Помилка при відправці в Telegram: {e}"
+    message = get_puzzle()
+    asyncio.run(send_message_async(message))
+    return "Задача відправлена ✅ або повідомлення про помилку буде в логах."
 
 # ====== Запуск веб-сервісу ======
 if __name__ == "__main__":
