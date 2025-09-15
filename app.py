@@ -23,8 +23,8 @@ app = Flask(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-# ===== URL JSON з задачами =====
-PUZZLES_URL = "[https://raw.githubusercontent.com/AntonRomashov87/Chess_puzzles/main/puzzles.json](https://raw.githubusercontent.com/AntonRomashov87/Chess_puzzles/main/puzzles.json)"
+# ===== URL JSON з задачами (ВИПРАВЛЕНО) =====
+PUZZLES_URL = "https://raw.githubusercontent.com/AntonRomashov87/Chess_puzzles/main/puzzles.json"
 
 # ===== Глобальні змінні =====
 PUZZLES = []
@@ -127,31 +127,10 @@ async def setup_bot():
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     if loop.is_running():
-        # Створюємо нове завдання в існуючому циклі
         loop.create_task(setup_bot())
     else:
-        # Запускаємо цикл, якщо він ще не запущений
         loop.run_until_complete(setup_bot())
 
     port = int(os.getenv("PORT", 5000))
-    # Використовуємо async-сумісний сервер замість app.run, наприклад, hypercorn
-    # Але для простоти, залишимо app.run, хоча це не ідеально для async-коду.
-    # Для Render/Railway це зазвичай працює завдяки gunicorn.
     app.run(host="0.0.0.0", port=port)
-```
-
-### Крок 2: Перевірка інших файлів (не змінюй їх, просто перевір)
-
-1.  **Файл `requirements.txt`** має містити:
-    ```
-    python-telegram-bot[ext]
-    Flask
-    gunicorn
-    aiohttp
-    ```
-
-2.  **Файл `Procfile`** має містити:
-    ```
-    web: gunicorn main:app
-    
 
