@@ -4,10 +4,10 @@ import asyncio
 import aiohttp
 import random
 import json
-from datetime import datetime, time
+from datetime import datetime
 
-from telegram import Bot
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Bot, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 import nest_asyncio
 
 # ===== Логування =====
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # ===== Токен і Chat ID =====
 BOT_TOKEN = "8092371216:AAF7bfwunLqI2ZrGBpE2goMaxXnol07vG0g"
-CHAT_ID = "598331739"  # або -1001234567890 для групи
+CHAT_ID = "598331739"
 
 # ===== URL JSON з задачами =====
 PUZZLES_URL = "https://raw.githubusercontent.com/AntonRomashov87/Chess_puzzles/main/puzzles.json"
@@ -45,52 +45,68 @@ async def load_puzzles():
         logger.error(f"Помилка при завантаженні puzzles.json: {e}")
         PUZZLES = []
 
-# ===== Відправка випадкової задачі =====
-async def send_random_puzzle(bot: Bot):
+# ===== Отримати випадкову задачу =====
+def get_random_puzzle():
     if not PUZZLES:
-        logger.warning("Задачі ще не завантажені.")
-        return
+        return "⚠️ Задачі ще не завантажені."
     puzzle = random.choice(PUZZLES)
-    msg = f"♟️ {puzzle.get('title', 'Задача')}:\n{puzzle.get('url', '')}"
-    try:
-        await bot.send_message(chat_id=CHAT_ID, text=msg)
-        logger.info("Задача надіслана ✅")
-    except Exception as e:
-        logger.error(f"Помилка при відправці в Telegram: {e}")
+    return f"♟️ {puzzle.get('title', 'Задача')}:\n{puzzle.get('url', '')}"
+
+# ===== Клавіатура =====
+def get_keyboard():
+    keyboard = [
+        [InlineKeyboardButton("♟️ Puzzle", callback_data="puzzle")],
+        [InlineKeyboardButton("ℹ️ Start", callback_data="start")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
 # ===== Команди бота =====
 async def start(update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Привіт! Я шаховий бот 🤖♟\n"
-        "Напиши /puzzle, щоб отримати випадкову задачу."
+        "Натискай кнопки нижче:",
+        reply_markup=get_keyboard()
     )
 
-async def puzzle_command(update, context: ContextTypes.DEFAULT_TYPE):
-    await send_random_puzzle(context.bot)
+# ===== Обробка кнопок =====
+async def button_handler(update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
 
-# ===== Функція для автоматичної розсилки =====
+    if query.data == "puzzle":
+        msg = get_random_puzzle()
+        await query.edit_message_text(
+            text=msg,
+            reply_markup=get_keyboard()
+        )
+    elif query.data == "start":
+        await query.edit_message_text(
+            text="Привіт! Я готовий дати тобі задачу ♟️",
+            reply_markup=get_keyboard()
+        )
+
+# ===== Автоматична розсилка =====
 async def scheduled_puzzles(bot: Bot):
     while True:
         now = datetime.now()
-        # Надсилаємо двічі на день: 08:00 і 20:00
         if now.hour in [8, 20] and now.minute == 0:
-            await send_random_puzzle(bot)
-            await asyncio.sleep(61)  # чекаємо 61 секунду, щоб не надіслати повторно
+            msg = get_random_puzzle()
+            await bot.send_message(chat_id=CHAT_ID, text=msg)
+            await asyncio.sleep(61)
         await asyncio.sleep(20)
 
 # ===== Основна функція =====
 async def main():
-    # Завантажуємо задачі
     await load_puzzles()
-
-    # Створюємо Application (асинхронний бот)
     app = Application.builder().token(BOT_TOKEN).build()
 
     # Команди
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("puzzle", puzzle_command))
 
-    # Запускаємо фонове завдання для автоматичної розсилки
+    # Кнопки
+    app.add_handler(CallbackQueryHandler(button_handler))
+
+    # Авто-розсилка
     asyncio.create_task(scheduled_puzzles(app.bot))
 
     logger.info("Бот запущений ✅")
@@ -98,6 +114,5 @@ async def main():
 
 # ===== Запуск =====
 if __name__ == "__main__":
-    # Дозволяє використовувати asyncio у Render
     nest_asyncio.apply()
     asyncio.get_event_loop().run_until_complete(main())
