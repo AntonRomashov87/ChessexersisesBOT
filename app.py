@@ -50,22 +50,19 @@ async def load_puzzles():
         logger.error(f"Помилка при завантаженні puzzles.json: {e}")
         PUZZLES = []
 
-# ===== Отримати випадкову задачу =====
-def get_random_puzzle():
-    if not PUZZLES:
-        return None
-    return random.choice(PUZZLES)
-
 # ===== Функція для екранування MarkdownV2 =====
 def escape_markdown_v2(text: str) -> str:
+    """Екранує спеціальні символи для Telegram MarkdownV2."""
     escape_chars = r"[_*\[\]()~`>#\+\-=|{}.!]"
     return re.sub(f'({escape_chars})', r'\\\1', text)
 
-# ===== Клавіатура =====
-def get_keyboard(state: str = "start"):
+# ===== Клавіатура (ОНОВЛЕНО для stateless-логіки) =====
+def get_keyboard(state: str = "start", puzzle_index: int = None):
+    """Створює динамічну клавіатуру. Тепер передає індекс задачі в callback_data."""
     if state == "puzzle_sent":
         keyboard = [
-            [InlineKeyboardButton("💡 Показати розв'язок", callback_data="show_solution")],
+            # Кнопка для розв'язку тепер містить індекс задачі
+            [InlineKeyboardButton("💡 Показати розв'язок", callback_data=f"sol_{puzzle_index}")],
             [InlineKeyboardButton("♟️ Нова задача", callback_data="new_puzzle")]
         ]
     else:
@@ -82,7 +79,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='MarkdownV2'
     )
 
-# ===== Обробка кнопок =====
+# ===== Обробка кнопок (ПОВНІСТЮ ПЕРЕПИСАНО для stateless-логіки) =====
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -90,8 +87,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = query.data
 
     if action == "new_puzzle":
-        puzzle = get_random_puzzle()
-        if not puzzle:
+        if not PUZZLES:
             await query.edit_message_text(
                 text=escape_markdown_v2("⚠️ Не вдалося завантажити задачі. Спробуйте пізніше."),
                 reply_markup=get_keyboard(state="start"),
@@ -99,28 +95,44 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        context.user_data['current_puzzle'] = puzzle
+        # Отримуємо випадкову задачу та її індекс у списку
+        puzzle_index, puzzle = random.choice(list(enumerate(PUZZLES)))
         
         title = escape_markdown_v2(puzzle.get('title', 'Задача'))
         url = puzzle.get('url', '')
         msg = f"♟️ *{title}*\n{url}"
-        await query.edit_message_text(text=msg, reply_markup=get_keyboard(state="puzzle_sent"), parse_mode='MarkdownV2')
+        
+        # Передаємо індекс у функцію для створення кнопки "Показати розв'язок"
+        await query.edit_message_text(
+            text=msg, 
+            reply_markup=get_keyboard(state="puzzle_sent", puzzle_index=puzzle_index), 
+            parse_mode='MarkdownV2'
+        )
 
-    elif action == "show_solution":
-        puzzle = context.user_data.get('current_puzzle')
-        if not puzzle:
+    elif action.startswith("sol_"):
+        try:
+            # Витягуємо індекс задачі з callback_data
+            puzzle_index = int(action.split("_")[1])
+            puzzle = PUZZLES[puzzle_index]
+            
+            title = escape_markdown_v2(puzzle.get('title', 'Задача'))
+            url = puzzle.get('url', '')
+            solution = escape_markdown_v2(puzzle.get('solution', 'Розв\'язок не знайдено.'))
+            msg = (
+                f"♟️ *{title}*\n{url}\n\n"
+                f"💡 *Розв'язок:* {solution}"
+            )
             await query.edit_message_text(
-                text=escape_markdown_v2("Будь ласка, спершу отримайте задачу."),
+                text=msg, 
+                reply_markup=get_keyboard(state="start"), 
+                parse_mode='MarkdownV2'
+            )
+        except (IndexError, ValueError):
+            await query.edit_message_text(
+                text=escape_markdown_v2("⚠️ Помилка: не вдалося знайти цю задачу. Будь ласка, отримайте нову."),
                 reply_markup=get_keyboard(state="start"),
                 parse_mode='MarkdownV2'
             )
-            return
-
-        title = escape_markdown_v2(puzzle.get('title', 'Задача'))
-        url = puzzle.get('url', '')
-        solution = escape_markdown_v2(puzzle.get('solution', 'Розв\'язок не знайдено.'))
-        msg = f"♟️ *{title}*\n{url}\n\n💡 *Розв'язок:* {solution}"
-        await query.edit_message_text(text=msg, reply_markup=get_keyboard(state="start"), parse_mode='MarkdownV2')
 
 # =======================
 # Webhook
@@ -154,8 +166,6 @@ async def setup_bot():
     await load_puzzles()
     
     PTB_APP = Application.builder().token(BOT_TOKEN).build()
-    
-    # ВИПРАВЛЕНО: Додаємо обов'язкову ініціалізацію
     await PTB_APP.initialize()
     
     PTB_APP.add_handler(CommandHandler("start", start_command))
@@ -184,3 +194,4 @@ asyncio.get_event_loop().run_until_complete(setup_bot())
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
