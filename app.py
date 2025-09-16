@@ -31,7 +31,7 @@ PUZZLES_URL = "https://raw.githubusercontent.com/AntonRomashov87/Chess_puzzles/m
 # ===== Глобальна змінна для програми =====
 PTB_APP = None
 
-# ===== Завантаження задач (тепер повертає список) =====
+# ===== Завантаження задач =====
 async def load_puzzles() -> list:
     try:
         async with aiohttp.ClientSession() as session:
@@ -51,13 +51,11 @@ async def load_puzzles() -> list:
 
 # ===== Функція для екранування MarkdownV2 =====
 def escape_markdown_v2(text: str) -> str:
-    """Екранує спеціальні символи для Telegram MarkdownV2."""
     escape_chars = r"[_*\[\]()~`>#\+\-=|{}.!]"
     return re.sub(f'({escape_chars})', r'\\\1', text)
 
 # ===== Клавіатура =====
 def get_keyboard(state: str = "start", puzzle_index: int = None):
-    """Створює динамічну клавіатуру, передаючи індекс задачі."""
     if state == "puzzle_sent":
         keyboard = [
             [InlineKeyboardButton("💡 Показати розв'язок", callback_data=f"sol_{puzzle_index}")],
@@ -77,7 +75,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='MarkdownV2'
     )
 
-# ===== Обробка кнопок (ОНОВЛЕНО для роботи з bot_data) =====
+# ===== Обробка кнопок =====
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -158,7 +156,6 @@ async def setup_bot():
 
     PTB_APP = Application.builder().token(BOT_TOKEN).build()
     
-    # Завантажуємо задачі і зберігаємо їх у спільне сховище
     puzzles_data = await load_puzzles()
     PTB_APP.bot_data['puzzles'] = puzzles_data
     
@@ -167,7 +164,9 @@ async def setup_bot():
     PTB_APP.add_handler(CommandHandler("start", start_command))
     PTB_APP.add_handler(CallbackQueryHandler(button_handler))
 
-    webhook_url = os.getenv("RENDER_EXTERNAL_URL")
+    # ВИПРАВЛЕНО: Використовуємо нову змінну PUBLIC_URL
+    webhook_url = os.getenv("PUBLIC_URL") or os.getenv("RAILWAY_STATIC_URL") or os.getenv("RENDER_EXTERNAL_URL")
+    
     if webhook_url:
         full_webhook_url = f"{webhook_url}/webhook"
         logger.info(f"Встановлюю вебхук на: {full_webhook_url}")
