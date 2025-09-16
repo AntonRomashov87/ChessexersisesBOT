@@ -4,6 +4,7 @@ import asyncio
 import aiohttp
 import random
 import json
+import re
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
@@ -55,17 +56,21 @@ def get_random_puzzle():
         return None
     return random.choice(PUZZLES)
 
-# ===== Клавіатура (ОНОВЛЕНО) =====
+# ===== Функція для екранування MarkdownV2 =====
+def escape_markdown_v2(text: str) -> str:
+    """Екранує спеціальні символи для Telegram MarkdownV2."""
+    escape_chars = r"[_*\[\]()~`>#\+\-=|{}.!]"
+    return re.sub(f'({escape_chars})', r'\\\1', text)
+
+# ===== Клавіатура =====
 def get_keyboard(state: str = "start"):
     """Створює динамічну клавіатуру залежно від стану."""
     if state == "puzzle_sent":
-        # Кнопки після відправки задачі
         keyboard = [
             [InlineKeyboardButton("💡 Показати розв'язок", callback_data="show_solution")],
             [InlineKeyboardButton("♟️ Нова задача", callback_data="new_puzzle")]
         ]
     else:
-        # Початкова клавіатура або після розв'язку
         keyboard = [
             [InlineKeyboardButton("♟️ Отримати задачу", callback_data="new_puzzle")]
         ]
@@ -74,12 +79,13 @@ def get_keyboard(state: str = "start"):
 # ===== Команди бота =====
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Привіт! Я шаховий бот 🤖♟\n"
-        "Натисни кнопку, щоб отримати свою першу задачу:",
-        reply_markup=get_keyboard(state="start")
+        escape_markdown_v2("Привіт! Я шаховий бот 🤖♟\n"
+        "Натисни кнопку, щоб отримати свою першу задачу:"),
+        reply_markup=get_keyboard(state="start"),
+        parse_mode='MarkdownV2'
     )
 
-# ===== Обробка кнопок (ПОВНІСТЮ ПЕРЕПИСАНО) =====
+# ===== Обробка кнопок =====
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -90,51 +96,60 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         puzzle = get_random_puzzle()
         if not puzzle:
             await query.edit_message_text(
-                text="⚠️ Не вдалося завантажити задачі. Спробуйте пізніше.",
-                reply_markup=get_keyboard(state="start")
+                text=escape_markdown_v2("⚠️ Не вдалося завантажити задачі. Спробуйте пізніше."),
+                reply_markup=get_keyboard(state="start"),
+                parse_mode='MarkdownV2'
             )
             return
         
-        # Зберігаємо поточну задачу для користувача
         context.user_data['current_puzzle'] = puzzle
         
-        msg = f"♟️ **{puzzle.get('title', 'Задача')}**\n{puzzle.get('url', '')}"
+        title = escape_markdown_v2(puzzle.get('title', 'Задача'))
+        url = puzzle.get('url', '')
+        msg = f"♟️ *{title}*\n{url}"
         await query.edit_message_text(
             text=msg,
             reply_markup=get_keyboard(state="puzzle_sent"),
-            parse_mode='Markdown' # Використовуємо Markdown для жирного шрифту
+            parse_mode='MarkdownV2'
         )
 
     elif action == "show_solution":
         puzzle = context.user_data.get('current_puzzle')
         if not puzzle:
             await query.edit_message_text(
-                text="Будь ласка, спершу отримайте задачу.",
-                reply_markup=get_keyboard(state="start")
+                text=escape_markdown_v2("Будь ласка, спершу отримайте задачу."),
+                reply_markup=get_keyboard(state="start"),
+                parse_mode='MarkdownV2'
             )
             return
 
-        solution = puzzle.get('solution', 'Розв\'язок не знайдено.')
+        title = escape_markdown_v2(puzzle.get('title', 'Задача'))
+        url = puzzle.get('url', '')
+        solution = escape_markdown_v2(puzzle.get('solution', 'Розв\'язок не знайдено.'))
         msg = (
-            f"♟️ **{puzzle.get('title', 'Задача')}**\n{puzzle.get('url', '')}\n\n"
-            f"💡 **Розв'язок:** {solution}"
+            f"♟️ *{title}*\n{url}\n\n"
+            f"💡 *Розв'язок:* {solution}"
         )
         await query.edit_message_text(
             text=msg,
             reply_markup=get_keyboard(state="start"),
-            parse_mode='Markdown'
+            parse_mode='MarkdownV2'
         )
 
 # =======================
-# Webhook
+# Webhook (з покращеною обробкою помилок)
 # =======================
 @app.route("/webhook", methods=["POST"])
 async def webhook():
     if PTB_APP:
-        update_data = request.get_json()
-        update = Update.de_json(update_data, PTB_APP.bot)
-        await PTB_APP.process_update(update)
-        return '', 200
+        try:
+            update_data = request.get_json()
+            update = Update.de_json(update_data, PTB_APP.bot)
+            await PTB_APP.process_update(update)
+            return '', 200
+        except Exception as e:
+            logger.error(f"Помилка при обробці оновлення: {e}")
+            return 'Error processing update', 500
     return 'Bot not initialized', 500
 
 @app.route("/", methods=["GET"])
@@ -152,11 +167,8 @@ async def setup_bot():
 
     await load_puzzles()
     
-    # Використовуємо `persistence` для збереження `user_data`
-    from telegram.ext import PicklePersistence
-    persistence = PicklePersistence(filepath="bot_data")
-    
-    PTB_APP = Application.builder().token(BOT_TOKEN).persistence(persistence).build()
+    # Створюємо додаток без persistence
+    PTB_APP = Application.builder().token(BOT_TOKEN).build()
     
     PTB_APP.add_handler(CommandHandler("start", start_command))
     PTB_APP.add_handler(CallbackQueryHandler(button_handler))
@@ -164,7 +176,8 @@ async def setup_bot():
     webhook_url = os.getenv("RAILWAY_STATIC_URL") or os.getenv("RENDER_EXTERNAL_URL")
     if webhook_url:
         full_webhook_url = f"https://{webhook_url}/webhook"
-        await PTB_APP.bot.set_webhook(full_webhook_url)
+        # Очищуємо "застряглі" оновлення
+        await PTB_APP.bot.set_webhook(full_webhook_url, drop_pending_updates=True)
         logger.info(f"Вебхук встановлено на {full_webhook_url}")
     else:
         logger.warning("URL для вебхука не знайдений. Пропускаємо встановлення.")
@@ -177,5 +190,5 @@ if __name__ == "__main__":
         loop.run_until_complete(setup_bot())
 
     port = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="host.docker.internal", port=port)
 
