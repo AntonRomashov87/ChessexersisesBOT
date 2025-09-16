@@ -5,6 +5,7 @@ import aiohttp
 import random
 import json
 import re
+import nest_asyncio
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
@@ -51,20 +52,17 @@ async def load_puzzles():
 
 # ===== Отримати випадкову задачу =====
 def get_random_puzzle():
-    """Повертає словник з даними задачі або None, якщо задач немає."""
     if not PUZZLES:
         return None
     return random.choice(PUZZLES)
 
 # ===== Функція для екранування MarkdownV2 =====
 def escape_markdown_v2(text: str) -> str:
-    """Екранує спеціальні символи для Telegram MarkdownV2."""
     escape_chars = r"[_*\[\]()~`>#\+\-=|{}.!]"
     return re.sub(f'({escape_chars})', r'\\\1', text)
 
 # ===== Клавіатура =====
 def get_keyboard(state: str = "start"):
-    """Створює динамічну клавіатуру залежно від стану."""
     if state == "puzzle_sent":
         keyboard = [
             [InlineKeyboardButton("💡 Показати розв'язок", callback_data="show_solution")],
@@ -79,8 +77,7 @@ def get_keyboard(state: str = "start"):
 # ===== Команди бота =====
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        escape_markdown_v2("Привіт! Я шаховий бот 🤖♟\n"
-        "Натисни кнопку, щоб отримати свою першу задачу:"),
+        escape_markdown_v2("Привіт! Я шаховий бот 🤖♟\nНатисни кнопку, щоб отримати свою першу задачу:"),
         reply_markup=get_keyboard(state="start"),
         parse_mode='MarkdownV2'
     )
@@ -107,11 +104,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         title = escape_markdown_v2(puzzle.get('title', 'Задача'))
         url = puzzle.get('url', '')
         msg = f"♟️ *{title}*\n{url}"
-        await query.edit_message_text(
-            text=msg,
-            reply_markup=get_keyboard(state="puzzle_sent"),
-            parse_mode='MarkdownV2'
-        )
+        await query.edit_message_text(text=msg, reply_markup=get_keyboard(state="puzzle_sent"), parse_mode='MarkdownV2')
 
     elif action == "show_solution":
         puzzle = context.user_data.get('current_puzzle')
@@ -126,18 +119,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         title = escape_markdown_v2(puzzle.get('title', 'Задача'))
         url = puzzle.get('url', '')
         solution = escape_markdown_v2(puzzle.get('solution', 'Розв\'язок не знайдено.'))
-        msg = (
-            f"♟️ *{title}*\n{url}\n\n"
-            f"💡 *Розв'язок:* {solution}"
-        )
-        await query.edit_message_text(
-            text=msg,
-            reply_markup=get_keyboard(state="start"),
-            parse_mode='MarkdownV2'
-        )
+        msg = f"♟️ *{title}*\n{url}\n\n💡 *Розв'язок:* {solution}"
+        await query.edit_message_text(text=msg, reply_markup=get_keyboard(state="start"), parse_mode='MarkdownV2')
 
 # =======================
-# Webhook (з покращеною обробкою помилок)
+# Webhook
 # =======================
 @app.route("/webhook", methods=["POST"])
 async def webhook():
@@ -157,7 +143,7 @@ def index():
     return "Шаховий бот працює через Webhook!", 200
 
 # =======================
-# Основна функція для запуску
+# Основна функція для налаштування
 # =======================
 async def setup_bot():
     global PTB_APP
@@ -167,28 +153,28 @@ async def setup_bot():
 
     await load_puzzles()
     
-    # Створюємо додаток без persistence
     PTB_APP = Application.builder().token(BOT_TOKEN).build()
     
     PTB_APP.add_handler(CommandHandler("start", start_command))
     PTB_APP.add_handler(CallbackQueryHandler(button_handler))
 
-    webhook_url = os.getenv("RAILWAY_STATIC_URL") or os.getenv("RENDER_EXTERNAL_URL")
+    webhook_url = os.getenv("RENDER_EXTERNAL_URL")
     if webhook_url:
         full_webhook_url = f"https://{webhook_url}/webhook"
-        # Очищуємо "застряглі" оновлення
         await PTB_APP.bot.set_webhook(full_webhook_url, drop_pending_updates=True)
         logger.info(f"Вебхук встановлено на {full_webhook_url}")
     else:
         logger.warning("URL для вебхука не знайдений. Пропускаємо встановлення.")
 
-if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    if loop.is_running():
-        loop.create_task(setup_bot())
-    else:
-        loop.run_until_complete(setup_bot())
+# =======================
+# ЗАПУСК
+# =======================
+# Цей код виконується, коли gunicorn імпортує файл, і налаштовує бота
+nest_asyncio.apply()
+asyncio.get_event_loop().run_until_complete(setup_bot())
 
+# Цей блок потрібен лише для локального тестування, на сервері він не виконується
+if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    app.run(host="host.docker.internal", port=port)
+    app.run(host="0.0.0.0", port=port)
 
