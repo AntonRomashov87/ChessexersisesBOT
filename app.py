@@ -159,18 +159,16 @@ async def setup_bot():
     PTB_APP.add_handler(CallbackQueryHandler(button_handler))
 
     webhook_url = os.getenv("RENDER_EXTERNAL_URL")
-    # ДОДАНО ЛОГУВАННЯ ДЛЯ ДІАГНОСТИКИ
     logger.info(f"Знайдено RENDER_EXTERNAL_URL: {webhook_url}")
     
     if webhook_url:
-        full_webhook_url = f"https://{webhook_url}/webhook"
-        # ДОДАНО ЛОГУВАННЯ ДЛЯ ДІАГНОСТИКИ
+        # ВИПРАВЛЕНО: Використовуємо URL як є, не додаючи зайвий "https://"
+        full_webhook_url = f"{webhook_url}/webhook"
         logger.info(f"Встановлюю вебхук на: {full_webhook_url}")
         try:
             await PTB_APP.bot.set_webhook(full_webhook_url, drop_pending_updates=True)
             logger.info(f"Вебхук успішно встановлено на {full_webhook_url}")
         except Exception as e:
-            # Логуємо помилку, якщо вебхук не вдалося встановити
             logger.error(f"НЕ вдалося встановити вебхук: {e}")
     else:
         logger.warning("URL для вебхука не знайдений. Пропускаємо встановлення.")
