@@ -155,6 +155,9 @@ async def setup_bot():
     
     PTB_APP = Application.builder().token(BOT_TOKEN).build()
     
+    # ВИПРАВЛЕНО: Додаємо обов'язкову ініціалізацію
+    await PTB_APP.initialize()
+    
     PTB_APP.add_handler(CommandHandler("start", start_command))
     PTB_APP.add_handler(CallbackQueryHandler(button_handler))
 
@@ -162,7 +165,6 @@ async def setup_bot():
     logger.info(f"Знайдено RENDER_EXTERNAL_URL: {webhook_url}")
     
     if webhook_url:
-        # ВИПРАВЛЕНО: Використовуємо URL як є, не додаючи зайвий "https://"
         full_webhook_url = f"{webhook_url}/webhook"
         logger.info(f"Встановлюю вебхук на: {full_webhook_url}")
         try:
@@ -182,4 +184,3 @@ asyncio.get_event_loop().run_until_complete(setup_bot())
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
