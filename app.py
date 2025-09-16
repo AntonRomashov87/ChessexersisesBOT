@@ -23,7 +23,7 @@ app = Flask(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-# ===== URL JSON з задачами (ВИПРАВЛЕНО) =====
+# ===== URL JSON з задачами =====
 PUZZLES_URL = "https://raw.githubusercontent.com/AntonRomashov87/Chess_puzzles/main/puzzles.json"
 
 # ===== Глобальні змінні =====
@@ -50,38 +50,79 @@ async def load_puzzles():
 
 # ===== Отримати випадкову задачу =====
 def get_random_puzzle():
+    """Повертає словник з даними задачі або None, якщо задач немає."""
     if not PUZZLES:
-        return "⚠️ Задачі ще не завантажені або сталася помилка."
-    puzzle = random.choice(PUZZLES)
-    return f"♟️ {puzzle.get('title', 'Задача')}:\n{puzzle.get('url', '')}"
+        return None
+    return random.choice(PUZZLES)
 
-# ===== Клавіатура =====
-def get_keyboard():
-    keyboard = [
-        [InlineKeyboardButton("♟️ Puzzle", callback_data="puzzle")],
-        [InlineKeyboardButton("ℹ️ Start", callback_data="start")]
-    ]
+# ===== Клавіатура (ОНОВЛЕНО) =====
+def get_keyboard(state: str = "start"):
+    """Створює динамічну клавіатуру залежно від стану."""
+    if state == "puzzle_sent":
+        # Кнопки після відправки задачі
+        keyboard = [
+            [InlineKeyboardButton("💡 Показати розв'язок", callback_data="show_solution")],
+            [InlineKeyboardButton("♟️ Нова задача", callback_data="new_puzzle")]
+        ]
+    else:
+        # Початкова клавіатура або після розв'язку
+        keyboard = [
+            [InlineKeyboardButton("♟️ Отримати задачу", callback_data="new_puzzle")]
+        ]
     return InlineKeyboardMarkup(keyboard)
 
 # ===== Команди бота =====
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Привіт! Я шаховий бот 🤖♟\n"
-        "Натискай кнопки нижче:",
-        reply_markup=get_keyboard()
+        "Натисни кнопку, щоб отримати свою першу задачу:",
+        reply_markup=get_keyboard(state="start")
     )
 
-# ===== Обробка кнопок =====
+# ===== Обробка кнопок (ПОВНІСТЮ ПЕРЕПИСАНО) =====
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if query.data == "puzzle":
-        msg = get_random_puzzle()
-        await query.edit_message_text(text=msg, reply_markup=get_keyboard())
-    elif query.data == "start":
+    
+    action = query.data
+
+    if action == "new_puzzle":
+        puzzle = get_random_puzzle()
+        if not puzzle:
+            await query.edit_message_text(
+                text="⚠️ Не вдалося завантажити задачі. Спробуйте пізніше.",
+                reply_markup=get_keyboard(state="start")
+            )
+            return
+        
+        # Зберігаємо поточну задачу для користувача
+        context.user_data['current_puzzle'] = puzzle
+        
+        msg = f"♟️ **{puzzle.get('title', 'Задача')}**\n{puzzle.get('url', '')}"
         await query.edit_message_text(
-            text="Привіт! Я готовий дати тобі задачу ♟️",
-            reply_markup=get_keyboard()
+            text=msg,
+            reply_markup=get_keyboard(state="puzzle_sent"),
+            parse_mode='Markdown' # Використовуємо Markdown для жирного шрифту
+        )
+
+    elif action == "show_solution":
+        puzzle = context.user_data.get('current_puzzle')
+        if not puzzle:
+            await query.edit_message_text(
+                text="Будь ласка, спершу отримайте задачу.",
+                reply_markup=get_keyboard(state="start")
+            )
+            return
+
+        solution = puzzle.get('solution', 'Розв\'язок не знайдено.')
+        msg = (
+            f"♟️ **{puzzle.get('title', 'Задача')}**\n{puzzle.get('url', '')}\n\n"
+            f"💡 **Розв'язок:** {solution}"
+        )
+        await query.edit_message_text(
+            text=msg,
+            reply_markup=get_keyboard(state="start"),
+            parse_mode='Markdown'
         )
 
 # =======================
@@ -111,7 +152,11 @@ async def setup_bot():
 
     await load_puzzles()
     
-    PTB_APP = Application.builder().token(BOT_TOKEN).build()
+    # Використовуємо `persistence` для збереження `user_data`
+    from telegram.ext import PicklePersistence
+    persistence = PicklePersistence(filepath="bot_data")
+    
+    PTB_APP = Application.builder().token(BOT_TOKEN).persistence(persistence).build()
     
     PTB_APP.add_handler(CommandHandler("start", start_command))
     PTB_APP.add_handler(CallbackQueryHandler(button_handler))
