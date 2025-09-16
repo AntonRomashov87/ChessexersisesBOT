@@ -159,21 +159,28 @@ async def setup_bot():
     PTB_APP.add_handler(CallbackQueryHandler(button_handler))
 
     webhook_url = os.getenv("RENDER_EXTERNAL_URL")
+    # ДОДАНО ЛОГУВАННЯ ДЛЯ ДІАГНОСТИКИ
+    logger.info(f"Знайдено RENDER_EXTERNAL_URL: {webhook_url}")
+    
     if webhook_url:
         full_webhook_url = f"https://{webhook_url}/webhook"
-        await PTB_APP.bot.set_webhook(full_webhook_url, drop_pending_updates=True)
-        logger.info(f"Вебхук встановлено на {full_webhook_url}")
+        # ДОДАНО ЛОГУВАННЯ ДЛЯ ДІАГНОСТИКИ
+        logger.info(f"Встановлюю вебхук на: {full_webhook_url}")
+        try:
+            await PTB_APP.bot.set_webhook(full_webhook_url, drop_pending_updates=True)
+            logger.info(f"Вебхук успішно встановлено на {full_webhook_url}")
+        except Exception as e:
+            # Логуємо помилку, якщо вебхук не вдалося встановити
+            logger.error(f"НЕ вдалося встановити вебхук: {e}")
     else:
         logger.warning("URL для вебхука не знайдений. Пропускаємо встановлення.")
 
 # =======================
 # ЗАПУСК
 # =======================
-# Цей код виконується, коли gunicorn імпортує файл, і налаштовує бота
 nest_asyncio.apply()
 asyncio.get_event_loop().run_until_complete(setup_bot())
 
-# Цей блок потрібен лише для локального тестування, на сервері він не виконується
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
