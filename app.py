@@ -5,7 +5,6 @@ import aiohttp
 import random
 import json
 import re
-import nest_asyncio
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
@@ -51,6 +50,7 @@ async def load_puzzles() -> list:
 
 # ===== Функція для екранування MarkdownV2 =====
 def escape_markdown_v2(text: str) -> str:
+    """Екранує спеціальні символи для Telegram MarkdownV2."""
     escape_chars = r"[_*\[\]()~`>#\+\-=|{}.!]"
     return re.sub(f'({escape_chars})', r'\\\1', text)
 
@@ -95,7 +95,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         puzzle_index, puzzle = random.choice(list(enumerate(puzzles_list)))
         
         title = escape_markdown_v2(puzzle.get('title', 'Задача'))
-        url = puzzle.get('url', '')
+        # ВИПРАВЛЕНО: Додано екранування для URL
+        url = escape_markdown_v2(puzzle.get('url', ''))
         msg = f"♟️ *{title}*\n{url}"
         
         await query.edit_message_text(
@@ -110,7 +111,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             puzzle = puzzles_list[puzzle_index]
             
             title = escape_markdown_v2(puzzle.get('title', 'Задача'))
-            url = puzzle.get('url', '')
+            # ВИПРАВЛЕНО: Додано екранування для URL
+            url = escape_markdown_v2(puzzle.get('url', ''))
             solution = escape_markdown_v2(puzzle.get('solution', 'Розв\'язок не знайдено.'))
             msg = f"♟️ *{title}*\n{url}\n\n💡 *Розв'язок:* {solution}"
             await query.edit_message_text(
@@ -164,9 +166,7 @@ async def setup_bot():
     PTB_APP.add_handler(CommandHandler("start", start_command))
     PTB_APP.add_handler(CallbackQueryHandler(button_handler))
 
-    # ВИПРАВЛЕНО: Використовуємо нову змінну PUBLIC_URL
-    webhook_url = os.getenv("PUBLIC_URL") or os.getenv("RAILWAY_STATIC_URL") or os.getenv("RENDER_EXTERNAL_URL")
-    
+    webhook_url = os.getenv("RENDER_EXTERNAL_URL")
     if webhook_url:
         full_webhook_url = f"{webhook_url}/webhook"
         logger.info(f"Встановлюю вебхук на: {full_webhook_url}")
@@ -179,12 +179,13 @@ async def setup_bot():
         logger.warning("URL для вебхука не знайдений.")
 
 # =======================
-# ЗАПУСК
+# ЗАПУСК (спрощено)
 # =======================
-nest_asyncio.apply()
-asyncio.get_event_loop().run_until_complete(setup_bot())
-
 if __name__ == "__main__":
+    asyncio.run(setup_bot())
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+else:
+    # Цей блок виконується, коли Gunicorn запускає додаток
+    asyncio.run(setup_bot())
 
