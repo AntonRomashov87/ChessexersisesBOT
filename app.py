@@ -5,6 +5,7 @@ import aiohttp
 import random
 import json
 import re
+import secrets
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
@@ -20,9 +21,10 @@ logger = logging.getLogger(__name__)
 # ===== Налаштування Flask =====
 app = Flask(__name__)
 
-# ===== Токен і Chat ID =====
+# ===== Токен і інші змінні середовища =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+CHAT_ID = os.getenv("CHAT_ID") # ID вашого чату/каналу для розсилки
+TRIGGER_SECRET = os.getenv("TRIGGER_SECRET") # Секретний ключ для запуску розсилки
 
 # ===== URL JSON з задачами =====
 PUZZLES_URL = "https://raw.githubusercontent.com/AntonRomashov87/Chess_puzzles/main/puzzles.json"
@@ -87,46 +89,62 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not puzzles_list:
             await query.edit_message_text(
                 text=escape_markdown_v2("⚠️ Не вдалося завантажити задачі. Спробуйте пізніше."),
-                reply_markup=get_keyboard(state="start"),
-                parse_mode='MarkdownV2'
+                reply_markup=get_keyboard(state="start"), parse_mode='MarkdownV2'
             )
             return
         
         puzzle_index, puzzle = random.choice(list(enumerate(puzzles_list)))
-        
         title = escape_markdown_v2(puzzle.get('title', 'Задача'))
         url = escape_markdown_v2(puzzle.get('url', ''))
         msg = f"♟️ *{title}*\n{url}"
-        
         await query.edit_message_text(
-            text=msg, 
-            reply_markup=get_keyboard(state="puzzle_sent", puzzle_index=puzzle_index), 
-            parse_mode='MarkdownV2'
+            text=msg, reply_markup=get_keyboard(state="puzzle_sent", puzzle_index=puzzle_index), parse_mode='MarkdownV2'
         )
 
     elif action.startswith("sol_"):
         try:
             puzzle_index = int(action.split("_")[1])
             puzzle = puzzles_list[puzzle_index]
-            
             title = escape_markdown_v2(puzzle.get('title', 'Задача'))
             url = escape_markdown_v2(puzzle.get('url', ''))
             solution = escape_markdown_v2(puzzle.get('solution', 'Розв\'язок не знайдено.'))
             msg = f"♟️ *{title}*\n{url}\n\n💡 *Розв'язок:* {solution}"
             await query.edit_message_text(
-                text=msg, 
-                reply_markup=get_keyboard(state="start"), 
-                parse_mode='MarkdownV2'
+                text=msg, reply_markup=get_keyboard(state="start"), parse_mode='MarkdownV2'
             )
         except (IndexError, ValueError):
             await query.edit_message_text(
                 text=escape_markdown_v2("⚠️ Помилка: не вдалося знайти цю задачу. Будь ласка, отримайте нову."),
-                reply_markup=get_keyboard(state="start"),
-                parse_mode='MarkdownV2'
+                reply_markup=get_keyboard(state="start"), parse_mode='MarkdownV2'
             )
 
 # =======================
-# Webhook
+# Функціонал для розсилки
+# =======================
+async def send_puzzle_now(chat_id: str):
+    """Вибирає та відправляє випадкову задачу."""
+    if not PTB_APP:
+        logger.error("Бот не ініціалізований для відправки задачі.")
+        return
+    
+    puzzles_list = PTB_APP.bot_data.get('puzzles', [])
+    if not puzzles_list:
+        logger.error("Список задач порожній, не можу відправити.")
+        return
+    
+    puzzle = random.choice(puzzles_list)
+    title = escape_markdown_v2(puzzle.get('title', 'Задача'))
+    url = escape_markdown_v2(puzzle.get('url', ''))
+    msg = f"♟️ *Щоденна задача*\n\n*{title}*\n{url}"
+
+    try:
+        await PTB_APP.bot.send_message(chat_id=chat_id, text=msg, parse_mode='MarkdownV2')
+        logger.info(f"Задачу успішно відправлено в чат {chat_id}")
+    except Exception as e:
+        logger.error(f"Не вдалося відправити задачу в чат {chat_id}: {e}")
+
+# =======================
+# Маршрути (Routes)
 # =======================
 @app.route("/webhook", methods=["POST"])
 async def webhook():
@@ -145,6 +163,24 @@ async def webhook():
 def index():
     return "Шаховий бот працює через Webhook!", 200
 
+@app.route("/trigger-puzzle/<secret>", methods=["POST"])
+async def trigger_puzzle_sending(secret: str):
+    if not TRIGGER_SECRET:
+        logger.warning("TRIGGER_SECRET не встановлено, розсилка неможлива.")
+        return "Secret not configured", 400
+        
+    if secret == TRIGGER_SECRET:
+        if not CHAT_ID:
+            logger.warning("CHAT_ID не встановлено, не знаю куди відправляти.")
+            return "Chat ID not configured", 400
+        
+        asyncio.create_task(send_puzzle_now(CHAT_ID))
+        logger.info("Запит на розсилку отримано та обробляється.")
+        return "Puzzle sending triggered", 200
+    else:
+        logger.warning("Отримано невірний секретний ключ для розсилки.")
+        return "Invalid secret", 403
+
 # =======================
 # Основна функція для налаштування
 # =======================
@@ -158,15 +194,12 @@ async def setup_bot():
     
     puzzles_data = await load_puzzles()
     PTB_APP.bot_data['puzzles'] = puzzles_data
-    
     await PTB_APP.initialize()
     
     PTB_APP.add_handler(CommandHandler("start", start_command))
     PTB_APP.add_handler(CallbackQueryHandler(button_handler))
 
-    # ВИПРАВЛЕНО: Використовуємо нову змінну PUBLIC_URL в першу чергу
     webhook_url = os.getenv("PUBLIC_URL") or os.getenv("RENDER_EXTERNAL_URL") or os.getenv("RAILWAY_STATIC_URL")
-    
     if webhook_url:
         full_webhook_url = f"{webhook_url}/webhook"
         logger.info(f"Встановлюю вебхук на: {full_webhook_url}")
